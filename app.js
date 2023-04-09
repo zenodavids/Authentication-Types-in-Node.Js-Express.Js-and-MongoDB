@@ -6,6 +6,8 @@ const ejs = require('ejs')
 const session = require('express-session')
 const passport = require('passport')
 const passportLocalMongoose = require('passport-local-mongoose')
+const GoogleStrategy = require('passport-google-oauth20').Strategy
+const findOrCreate = require('mongoose-findorcreate')
 
 const app = express()
 
@@ -36,10 +38,13 @@ mongoose.connect('mongodb://127.0.0.1:27017/userDB', { useNewUrlParser: true })
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
+  googleId: String,
+  googleName: String,
 })
 
 // hash and salt paswords and save the hash to our database
 userSchema.plugin(passportLocalMongoose)
+userSchema.plugin(findOrCreate)
 
 // sets up mongoose to use the schema
 const User = new mongoose.model('user', userSchema)
@@ -48,14 +53,96 @@ const User = new mongoose.model('user', userSchema)
 passport.use(User.createStrategy())
 
 // creates cookie
-passport.serializeUser(User.serializeUser())
+passport.serializeUser(async (user, done) => {
+  try {
+    const id = user.id
+    done(null, id)
+  } catch (error) {
+    done(error)
+  }
+})
+
 // use cookie
-passport.deserializeUser(User.deserializeUser())
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await User.findById(id)
+    done(null, user)
+  } catch (err) {
+    done(err)
+  }
+})
+
+// ===========================================
+// Todo -- https://www.passportjs.org/packages/passport-google-oauth20/
+// passport.use(
+//   new GoogleStrategy(
+//     {
+//       clientID: process.env.GOOGLE_CLIENT_ID,
+//       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+//       // if login/sign up is successful, direct the user to this url
+//       callbackURL: 'http://127.0.0.1:3000/auth/google/secrets',
+//     },
+
+//     (accessToken, refreshToken, profile, cb) => {
+//       // log the user profile
+//       console.log(profile)
+
+//       // ! "findOrCreate" is not a mongoDB function
+//       // TODO -- install package from https://www.npmjs.com/package/mongoose-findorcreate
+//       User.findOrCreate({ googleId: profile.id }, (err, user) => {
+//         return cb(err, user)
+//       })
+//     }
+//   )
+// )
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      // if login/sign up is successful, direct the user to this url
+      callbackURL: 'http://127.0.0.1:3000/auth/google/secrets',
+    },
+
+    (accessToken, refreshToken, profile, cb) => {
+      try {
+        console.log(profile.displayName)
+
+        // ! "findOrCreate" is not a mongoDB function
+        // TODO -- install package from https://www.npmjs.com/package/mongoose-findorcreate
+        User.findOrCreate(
+          { googleId: profile.id, googleName: profile.displayName },
+          (err, user) => {
+            return cb(err, user)
+          }
+        )
+      } catch (error) {
+        console.log(err)
+      }
+      // log the user profile
+      console.log(profile)
+    }
+  )
+)
+
+// ===========================================
 
 // routes
 app.get('/', (req, res) => {
   res.render('home')
 })
+
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile'] }))
+
+app.get(
+  '/auth/google/secrets',
+  passport.authenticate('google', { failureRedirect: '/login' }),
+  function (req, res) {
+    // Successful authentication, redirect the secret page.
+    res.redirect('/secrets')
+  }
+)
+
 app.get('/login', (req, res) => {
   res.render('login')
 })
