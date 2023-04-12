@@ -39,10 +39,11 @@ const userSchema = new mongoose.Schema({
   email: String,
   password: String,
   googleId: String,
-  googleName: String,
+  username: String,
+  secret: String,
 })
 
-// hash and salt paswords and save the hash to our database
+// hash and salt passwords and save the hash to our database
 userSchema.plugin(passportLocalMongoose)
 userSchema.plugin(findOrCreate)
 
@@ -74,27 +75,6 @@ passport.deserializeUser(async (id, done) => {
 
 // ===========================================
 // Todo -- https://www.passportjs.org/packages/passport-google-oauth20/
-// passport.use(
-//   new GoogleStrategy(
-//     {
-//       clientID: process.env.GOOGLE_CLIENT_ID,
-//       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-//       // if login/sign up is successful, direct the user to this url
-//       callbackURL: 'http://127.0.0.1:3000/auth/google/secrets',
-//     },
-
-//     (accessToken, refreshToken, profile, cb) => {
-//       // log the user profile
-//       console.log(profile)
-
-//       // ! "findOrCreate" is not a mongoDB function
-//       // TODO -- install package from https://www.npmjs.com/package/mongoose-findorcreate
-//       User.findOrCreate({ googleId: profile.id }, (err, user) => {
-//         return cb(err, user)
-//       })
-//     }
-//   )
-// )
 passport.use(
   new GoogleStrategy(
     {
@@ -111,7 +91,7 @@ passport.use(
         // ! "findOrCreate" is not a mongoDB function
         // TODO -- install package from https://www.npmjs.com/package/mongoose-findorcreate
         User.findOrCreate(
-          { googleId: profile.id, googleName: profile.displayName },
+          { googleId: profile.id, username: profile.displayName },
           (err, user) => {
             return cb(err, user)
           }
@@ -146,11 +126,69 @@ app.get(
 app.get('/login', (req, res) => {
   res.render('login')
 })
+
 app.get('/register', (req, res) => {
   res.render('register')
 })
-app.get('/secrets', (req, res) => {
-  req.isAuthenticated ? res.render('secrets') : res.render('login')
+
+// if logged in, access this page. will use it for my gigly in a way that only logged in users can access this page. eg only logged in users can access a more detailed info about a job
+// click on the secret button to take us to the secret page
+// app.get('/secrets', (req, res) => {
+//   req.isAuthenticated ? res.render('secrets') : res.render('login')
+// })
+
+// ! this will be seen by everyone whether they are logged in or not
+
+// this will be seen by everyone
+app.get('/secrets', async (req, res) => {
+  try {
+    // find all users who have submitted a secret
+    const foundUsers = await User.find({ secret: { $ne: null } })
+
+    // if no errors and users are found
+    if (foundUsers) {
+      // render the secrets page with the list of users who have submitted secrets
+      res.render('secrets', { usersWithSecrets: foundUsers })
+    }
+  } catch (err) {
+    // if there is an error, log it
+    console.log('unable to find users with secrets', err)
+  }
+})
+
+// click on the submit button to take us to the submit page
+app.get('/submit', (req, res) => {
+  req.isAuthenticated ? res.render('submit') : res.render('login')
+})
+
+// submit a secret and see what others also submitted
+app.post('/submit', async (req, res) => {
+  // get the secret submitted by the user
+  const submittedSecret = req.body.secret
+
+  // log the user id and username
+  console.log(`user id is ========> ${req.user.id}`)
+  console.log(`user username is ========> ${req.user.username}`)
+
+  try {
+    // find the logged in user by their id
+    const foundUser = await User.findById(req.user.id)
+
+    // if no errors and user is found,
+    if (foundUser) {
+      // allow them to submit a secret
+      foundUser.secret = submittedSecret
+
+      // save the user's updated secret
+      await foundUser.save()
+
+      // redirect the user to the secrets page
+      res.redirect('/secrets')
+    }
+  } catch (err) {
+    // if there is an error, log it
+    console.log('unable to find user to post secret', err)
+  }
 })
 
 app.get('/logout', (req, res) => {
